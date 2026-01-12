@@ -1,0 +1,5 @@
+{
+  "name": "keimai.app",
+  "description": "A visual graph database schema planning tool with D3.js force-directed layouts, drag-and-drop editing, and Gemini AI powered schema generation.",
+  "requestFramePermissions": []
+}
