@@ -18,6 +18,9 @@ const getSchemaFromAI = async (prompt: string, currentSchema: GraphData | undefi
     2. Ensure the JSON is valid and parseable.
     3. If an existing schema is provided, PRESERVE existing IDs unless instructed to delete them.
     4. If creating a new schema, use descriptive but simple IDs (e.g., 'user', 'order').
+    5. CRITICAL: You MUST connect related nodes with 'links'. A schema without relationships is incomplete. Identify foreign keys or logical connections and create links for them.
+    6. Ensure 'source' and 'target' in links correspond EXACTLY to node 'id's.
+    7. Use standard convention uppercase for link labels (e.g., 'AUTHORED', 'CONTAINS', 'BELONGS_TO').
     
     Node structure:
     {
@@ -63,6 +66,8 @@ const getSchemaFromAI = async (prompt: string, currentSchema: GraphData | undefi
   } else {
     userContent += `\n\nCONTEXT: Create a BRAND NEW schema from scratch. Ignore any previous context.`;
   }
+
+  userContent += `\n\nREMINDER: Explicitly define all relationships between nodes in the 'links' array.`;
 
   try {
     const response = await ai.models.generateContent({

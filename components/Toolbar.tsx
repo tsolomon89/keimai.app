@@ -1,6 +1,6 @@
 import React from 'react';
 import { SimulationConfig } from '../types';
-import { Sparkles, Download, Upload, Share2, Grid, Activity, PlayCircle } from 'lucide-react';
+import { Sparkles, Download, Upload, Share2, Grid, Activity, PlayCircle, Undo, Redo } from 'lucide-react';
 
 interface ToolbarProps {
   config: SimulationConfig;
@@ -8,9 +8,23 @@ interface ToolbarProps {
   onOpenAI: () => void;
   onExport: () => void;
   onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
-const Toolbar: React.FC<ToolbarProps> = ({ config, onConfigChange, onOpenAI, onExport, onImport }) => {
+const Toolbar: React.FC<ToolbarProps> = ({ 
+  config, 
+  onConfigChange, 
+  onOpenAI, 
+  onExport, 
+  onImport,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo
+}) => {
   return (
     <div className="absolute top-4 left-4 right-4 h-14 glass-panel rounded-xl flex items-center px-4 justify-between z-20 shadow-lg">
       <div className="flex items-center gap-4">
@@ -18,7 +32,28 @@ const Toolbar: React.FC<ToolbarProps> = ({ config, onConfigChange, onOpenAI, onE
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-900/20">
             <Share2 size={18} className="text-white" />
           </div>
-          <span className="font-bold text-lg tracking-tight">Graph<span className="text-blue-400">Plan</span></span>
+          <span className="font-bold text-lg tracking-tight">keimai<span className="text-blue-400">.app</span></span>
+        </div>
+
+        <div className="h-6 w-px bg-gray-700 mx-2" />
+        
+        <div className="flex items-center gap-1">
+             <button 
+                onClick={onUndo}
+                disabled={!canUndo}
+                className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+                title="Undo (Ctrl+Z)"
+             >
+                 <Undo size={18} />
+             </button>
+             <button 
+                onClick={onRedo}
+                disabled={!canRedo}
+                className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+                title="Redo (Ctrl+R)"
+             >
+                 <Redo size={18} />
+             </button>
         </div>
 
         <div className="h-6 w-px bg-gray-700 mx-2" />
