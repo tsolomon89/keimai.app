@@ -100,29 +100,34 @@ const App: React.FC = () => {
     }));
   };
 
-  const handleGenerateSchema = async (prompt: string) => {
+  const handleGenerateSchema = async (prompt: string, mode: 'merge' | 'replace') => {
     setIsAILoading(true);
     try {
-      const newSchema = await geminiService.getSchemaFromAI(prompt, graphData);
+      const newSchema = await geminiService.getSchemaFromAI(prompt, mode === 'merge' ? graphData : undefined, mode);
       
-      // Merge logic could go here, but for now we replace or append
-      // Let's create a map of existing nodes to preserve positions if IDs match
-      const existingMap = new Map<string, GraphNode>(
-        graphData.nodes.map(n => [n.id, n])
-      );
+      if (mode === 'replace') {
+         // Fresh start, D3 will handle initial positions
+         setGraphData(newSchema);
+      } else {
+         // Merge logic: Preserve positions of existing nodes
+         const existingMap = new Map<string, GraphNode>(
+            graphData.nodes.map(n => [n.id, n])
+         );
+         
+         const safeNewNodes = newSchema.nodes || [];
+         const safeNewLinks = newSchema.links || [];
+
+         const mergedNodes = safeNewNodes.map(n => {
+             const ex = existingMap.get(n.id);
+             return ex ? { ...n, x: ex.x, y: ex.y } : n;
+         });
+
+         setGraphData({
+            nodes: mergedNodes,
+            links: safeNewLinks
+         });
+      }
       
-      const safeNewNodes = newSchema.nodes || [];
-      const safeNewLinks = newSchema.links || [];
-
-      const mergedNodes = safeNewNodes.map(n => {
-          const ex = existingMap.get(n.id);
-          return ex ? { ...n, x: ex.x, y: ex.y } : n;
-      });
-
-      setGraphData({
-        nodes: mergedNodes,
-        links: safeNewLinks
-      });
       setIsAIModalOpen(false);
     } catch (error) {
       alert("Failed to generate schema. Please check your API Key or try again.");
@@ -212,6 +217,7 @@ const App: React.FC = () => {
         onClose={() => setIsAIModalOpen(false)}
         onGenerate={handleGenerateSchema}
         isLoading={isAILoading}
+        hasExistingData={graphData.nodes.length > 0}
       />
     </div>
   );

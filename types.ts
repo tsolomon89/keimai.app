@@ -4,6 +4,8 @@ export interface GraphNode {
   type: 'node' | 'document' | 'table';
   x?: number;
   y?: number;
+  vx?: number;
+  vy?: number;
   fx?: number | null; // Fixed x for drag
   fy?: number | null; // Fixed y for drag
   properties: NodeProperty[];

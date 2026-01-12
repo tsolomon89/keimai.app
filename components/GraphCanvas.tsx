@@ -27,11 +27,12 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  
+  // These refs store the D3 internal state (with x, y, vx, vy)
   const nodesRef = useRef<GraphNode[]>([]); 
   const linksRef = useRef<GraphLink[]>([]); 
 
   // Refs to hold latest selection state for D3 event handlers to access
-  // This prevents us from needing to re-bind events (and rebuild DOM) when selection changes
   const selectedNodeRef = useRef(selectedNode);
   const selectedLinkRef = useRef(selectedLink);
 
@@ -39,10 +40,6 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
     selectedNodeRef.current = selectedNode;
     selectedLinkRef.current = selectedLink;
   }, [selectedNode, selectedLink]);
-
-  // Safe accessors
-  const nodes = data?.nodes || [];
-  const links = data?.links || [];
 
   // Handle Resize
   useEffect(() => {
@@ -57,13 +54,97 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Main D3 Simulation Effect - Only runs on Topology changes (nodes added/removed), not selection
+  // --- VISUAL & DATA UPDATE EFFECT ---
+  // This effect handles updates to properties (label, color, type) WITHOUT breaking the simulation
+  // It syncs the React 'data' prop into the 'nodesRef' D3 state
+  useEffect(() => {
+    if (!svgRef.current) return;
+
+    // 1. Sync Data properties to D3 state
+    // We want to keep existing D3 nodes (to preserve x,y) but update their data props
+    // If a node is new (not in nodesRef), it will be added in the Main Simulation Effect (below)
+    // If a node is removed, it is handled there too.
+    // This part is mainly for UPDATING existing nodes.
+    const currentNodesMap = new Map(nodesRef.current.map(n => [n.id, n]));
+    
+    // We iterate over the incoming data to update the ref if it exists
+    data.nodes.forEach(newDataNode => {
+        const existingNode = currentNodesMap.get(newDataNode.id);
+        if (existingNode) {
+            // Update properties in place
+            existingNode.label = newDataNode.label;
+            existingNode.type = newDataNode.type;
+            existingNode.properties = newDataNode.properties;
+            existingNode.color = newDataNode.color;
+            // Do NOT update x, y, fx, fy here, let D3 handle those
+        }
+    });
+
+    // 2. Direct DOM Updates for Performance
+    const svg = d3.select(svgRef.current);
+    
+    // Update Labels
+    svg.selectAll(".nodes text")
+       .text((d: any) => d.label);
+
+    // Update Link Labels
+    svg.selectAll(".link-labels text")
+       .text((d: any) => d.label);
+
+    // Update Node Shapes & Colors
+    svg.selectAll(".nodes g").each(function(d: any) {
+        const group = d3.select(this);
+        const shape = group.select(".node-shape");
+        const currentType = shape.attr("data-type");
+        const currentColor = d.color || (d.type === 'table' ? '#3b82f6' : d.type === 'document' ? '#10b981' : '#8b5cf6');
+
+        // Check for Type Change -> Re-render shape
+        if (currentType !== d.type) {
+            shape.remove();
+            
+            let newShape;
+            if (d.type === 'table') {
+                newShape = group.insert("rect", ":first-child")
+                  .attr("width", 50)
+                  .attr("height", 30)
+                  .attr("x", -25)
+                  .attr("y", -15)
+                  .attr("rx", 4);
+            } else if (d.type === 'document') {
+                newShape = group.insert("path", ":first-child")
+                  .attr("d", "M-20,-25 L10,-25 L20,-15 L20,25 L-20,25 Z");
+            } else {
+                newShape = group.insert("circle", ":first-child")
+                  .attr("r", 20);
+            }
+            
+            newShape
+                .attr("class", "node-shape")
+                .attr("data-type", d.type)
+                .attr("stroke", "#fff")
+                .attr("stroke-width", 1.5)
+                .attr("fill", currentColor); // Apply color immediately
+        } else {
+            // Just update color
+            shape.attr("fill", currentColor);
+        }
+    });
+
+  }, [data]); // Runs on every data change (edit)
+
+  // --- MAIN SIMULATION EFFECT ---
+  // Runs only when TOPOLOGY changes (nodes/links added or removed)
   useEffect(() => {
     if (!svgRef.current) return;
 
     const svg = d3.select(svgRef.current);
-    
-    // Clear previous
+    const nodes = data.nodes;
+    const links = data.links;
+
+    // Clear previous elements if we are doing a full re-bind
+    // Note: Ideally D3 enter/update/exit pattern handles this without full clear
+    // But for React + D3 simplicity in this specific project structure, full rebuild on topology change is safer
+    // The "update" effect above handles the frequent property changes.
     svg.selectAll("*").remove();
 
     // Container for zoom
@@ -78,19 +159,27 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     svg.call(zoom);
 
-    // Initial Data Clone
-    const currentNodesMap = new Map<string, GraphNode>(
-      nodesRef.current.map(n => [n.id, n])
-    );
+    // Initial Data Clone / Sync
+    // We try to preserve existing simulation node state (x,y) if ID matches
+    const previousNodesMap = new Map(nodesRef.current.map(n => [n.id, n]));
     
     nodesRef.current = nodes.map(n => {
-      const existing = currentNodesMap.get(n.id);
+      const existing = previousNodesMap.get(n.id);
       if (existing) {
-        return { ...n, x: existing.x, y: existing.y, fx: existing.fx, fy: existing.fy };
+        return { 
+            ...n, // Take new properties
+            x: existing.x, 
+            y: existing.y, 
+            vx: existing.vx, 
+            vy: existing.vy,
+            fx: existing.fx, 
+            fy: existing.fy 
+        };
       }
-      return { ...n };
+      return { ...n }; // New node
     });
 
+    // Deep copy links to avoid mutating props
     linksRef.current = links.map(l => ({ ...l }));
 
     // Define Simulation
@@ -98,12 +187,8 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
       .force("link", d3.forceLink<GraphNode, GraphLink>(linksRef.current).id(d => d.id).distance(config.distance))
       .force("charge", d3.forceManyBody().strength(config.charge))
       .force("center", d3.forceCenter(dimensions.width / 2, dimensions.height / 2).strength(0.05))
-      .force("collide", d3.forceCollide(30).strength(0.5));
+      .force("collide", d3.forceCollide(35).strength(0.5));
       
-    // Apply initial config
-    simulation.force("charge", d3.forceManyBody().strength(config.charge));
-    (simulation.force("link") as d3.ForceLink<GraphNode, GraphLink>).distance(config.distance);
-
     simulationRef.current = simulation;
 
     // --- DRAWING ---
@@ -158,45 +243,45 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
       )
       .on("click", (event, d) => {
         event.stopPropagation();
-        
-        // SHIFT + CLICK Logic for Link Creation
-        // We use the Ref to get the CURRENT selected node without stale closures
         const currentSelected = selectedNodeRef.current;
         if (event.shiftKey && currentSelected && currentSelected.id !== d.id) {
             onLinkCreate(currentSelected.id, d.id);
             return;
         }
-
         onNodeSelect(d);
       });
 
     // Node shapes
     nodeGroup.each(function(d) {
       const el = d3.select(this);
+      const color = d.color || (d.type === 'table' ? '#3b82f6' : d.type === 'document' ? '#10b981' : '#8b5cf6');
       
       if (d.type === 'table') {
         el.append("rect")
-          .attr("class", "node-shape") // Class for selection targeting
+          .attr("class", "node-shape")
+          .attr("data-type", "table")
           .attr("width", 50)
           .attr("height", 30)
           .attr("x", -25)
           .attr("y", -15)
           .attr("rx", 4)
-          .attr("fill", "#3b82f6")
+          .attr("fill", color)
           .attr("stroke", "#fff")
           .attr("stroke-width", 1.5);
       } else if (d.type === 'document') {
          el.append("path")
           .attr("class", "node-shape")
+          .attr("data-type", "document")
           .attr("d", "M-20,-25 L10,-25 L20,-15 L20,25 L-20,25 Z")
-          .attr("fill", "#10b981")
+          .attr("fill", color)
           .attr("stroke", "#fff")
           .attr("stroke-width", 1.5);
       } else {
         el.append("circle")
           .attr("class", "node-shape")
+          .attr("data-type", "node")
           .attr("r", 20)
-          .attr("fill", "#8b5cf6")
+          .attr("fill", color)
           .attr("stroke", "#fff")
           .attr("stroke-width", 1.5);
       }
@@ -204,7 +289,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     nodeGroup.append("text")
       .text(d => d.label)
-      .attr("dy", 35) // Below the node
+      .attr("dy", 35)
       .attr("text-anchor", "middle")
       .attr("fill", "white")
       .attr("font-size", 12)
@@ -244,9 +329,6 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
       if (!event.active) simulation.alphaTarget(0.3).restart();
       d.fx = d.x;
       d.fy = d.y;
-      
-      // IMPORTANT: Do NOT select if holding shift, as that's reserved for Link Creation in 'click'
-      // Also avoids immediately switching selection when trying to link
       if (!event.sourceEvent.shiftKey) {
           onNodeSelect(d);
       }
@@ -259,15 +341,12 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     function dragended(event: any, d: GraphNode) {
       if (!event.active) simulation.alphaTarget(0);
-      // We don't nullify fx/fy so the user can place nodes
     }
 
-    // Cleanup
     return () => {
       simulation.stop();
     };
-    // Note: selectedNode/Link REMOVED from dependency array to prevent DOM destruction on selection
-  }, [nodes.length, links.length, dimensions, config.grouping]); 
+  }, [data.nodes.length, data.links.length, dimensions, config.grouping]); // Only run on topology/layout change
 
   // Secondary Effect: Visual Updates for Selection (Does not rebuild DOM)
   useEffect(() => {
@@ -309,9 +388,9 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
        .attr("fill", (d: any) => (currentLink === d.id) ? "#93c5fd" : "#9ca3af")
        .attr("font-weight", (d: any) => (currentLink === d.id) ? "bold" : "normal");
 
-  }, [selectedNode, selectedLink, nodes.length, links.length]); 
+  }, [selectedNode, selectedLink, data.nodes.length, data.links.length]); 
 
-  // Dynamic Updates without full re-render (Config changes)
+  // Dynamic Updates for config
   useEffect(() => {
     if (simulationRef.current) {
       simulationRef.current.force("charge", d3.forceManyBody().strength(config.charge));
@@ -335,10 +414,11 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
         type: type as any,
         x: x, 
         y: y,
-        properties: []
+        properties: [],
+        color: type === 'table' ? '#3b82f6' : type === 'document' ? '#10b981' : '#8b5cf6'
       };
       
-      const newNodes = [...nodes, newNode];
+      const newNodes = [...data.nodes, newNode];
       onNodesChange(newNodes);
     }
   };

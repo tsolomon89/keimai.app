@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { GraphData, GraphNode } from "../types";
 
-const getSchemaFromAI = async (prompt: string, currentSchema?: GraphData): Promise<GraphData> => {
+const getSchemaFromAI = async (prompt: string, currentSchema: GraphData | undefined, mode: 'merge' | 'replace'): Promise<GraphData> => {
   if (!process.env.API_KEY) {
     throw new Error("API Key is missing");
   }
@@ -13,9 +13,11 @@ const getSchemaFromAI = async (prompt: string, currentSchema?: GraphData): Promi
     Your task is to generate or modify a database schema based on the user's request.
     The output must be a strictly valid JSON object representing a graph with 'nodes' and 'links'.
     
-    IMPORTANT: 
-    1. Return ONLY the raw JSON object. Do not wrap it in markdown code blocks (e.g., \`\`\`json).
+    IMPORTANT RULES:
+    1. Return ONLY the raw JSON object. Do not wrap it in markdown code blocks.
     2. Ensure the JSON is valid and parseable.
+    3. If an existing schema is provided, PRESERVE existing IDs unless instructed to delete them.
+    4. If creating a new schema, use descriptive but simple IDs (e.g., 'user', 'order').
     
     Node structure:
     {
@@ -32,14 +34,10 @@ const getSchemaFromAI = async (prompt: string, currentSchema?: GraphData): Promi
       target: string (id of target node),
       label: string (relationship name, e.g., 'AUTHORED', 'CONTAINS')
     }
-
-    Ensure IDs are unique string values (e.g., 'n1', 'n2').
-    Be creative but realistic with properties.
   `;
 
-  // Sanitize and simplify schema to avoid circular references from D3 and reduce input token usage
-  // D3 converts source/target to objects, so we must extract the IDs for the prompt
-  const simplifiedSchema = currentSchema ? {
+  // Only provide context if merging
+  const simplifiedSchema = (mode === 'merge' && currentSchema) ? {
     nodes: currentSchema.nodes.map(n => ({
         id: n.id, 
         label: n.label, 
@@ -54,10 +52,16 @@ const getSchemaFromAI = async (prompt: string, currentSchema?: GraphData): Promi
     }))
   } : null;
 
-  let userContent = `Create a schema for: ${prompt}`;
+  let userContent = `User Request: ${prompt}`;
   
   if (simplifiedSchema) {
-    userContent += `\n\nBased on the following existing schema (preserve existing IDs if possible, or extend): \n${JSON.stringify(simplifiedSchema)}`;
+    userContent += `\n\nCONTEXT: The user wants to EXTEND or MODIFY the following existing schema.\n
+    - Integrate new nodes/links into this structure.
+    - RETURN THE FULL SCHEMA (Existing + New).
+    - Do not lose existing nodes unless the user request implies deleting them.
+    \nExisting Schema:\n${JSON.stringify(simplifiedSchema)}`;
+  } else {
+    userContent += `\n\nCONTEXT: Create a BRAND NEW schema from scratch. Ignore any previous context.`;
   }
 
   try {
@@ -116,7 +120,7 @@ const getSchemaFromAI = async (prompt: string, currentSchema?: GraphData): Promi
     let text = response.text;
     if (!text) throw new Error("No response from AI");
     
-    // Clean potential markdown code blocks if the model ignores the instruction
+    // Clean potential markdown code blocks
     text = text.replace(/```json\n?|```/g, '').trim();
 
     try {
@@ -124,7 +128,6 @@ const getSchemaFromAI = async (prompt: string, currentSchema?: GraphData): Promi
         return parsed as GraphData;
     } catch (parseError) {
         console.error("JSON Parse Error. Raw text:", text);
-        // Attempt to salvage valid JSON from a potentially messy response
         const jsonMatch = text.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
             try {
