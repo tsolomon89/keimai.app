@@ -21,6 +21,7 @@ const getSchemaFromAI = async (prompt: string, currentSchema: GraphData | undefi
     5. CRITICAL: You MUST connect related nodes with 'links'. A schema without relationships is incomplete. Identify foreign keys or logical connections and create links for them.
     6. Ensure 'source' and 'target' in links correspond EXACTLY to node 'id's.
     7. Use standard convention uppercase for link labels (e.g., 'AUTHORED', 'CONTAINS', 'BELONGS_TO').
+    8. Property 'value' should be a SHORT example string (max 50 chars). Do NOT generate long random UUIDs or repeated text.
     
     Node structure:
     {
@@ -67,7 +68,7 @@ const getSchemaFromAI = async (prompt: string, currentSchema: GraphData | undefi
     userContent += `\n\nCONTEXT: Create a BRAND NEW schema from scratch. Ignore any previous context.`;
   }
 
-  userContent += `\n\nREMINDER: Explicitly define all relationships between nodes in the 'links' array.`;
+  userContent += `\n\nREMINDER: Explicitly define all relationships between nodes in the 'links' array. Keep example values short.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -77,6 +78,7 @@ const getSchemaFromAI = async (prompt: string, currentSchema: GraphData | undefi
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         maxOutputTokens: 20000, 
+        temperature: 0.2, // Reduced temperature to prevent repetition loops
         responseSchema: {
             type: Type.OBJECT,
             properties: {

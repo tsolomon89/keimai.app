@@ -5,10 +5,10 @@ import { GraphData, GraphNode, GraphLink, SimulationConfig } from '../types';
 interface GraphCanvasProps {
   data: GraphData;
   config: SimulationConfig;
-  selectedNode: GraphNode | null;
-  selectedLink: GraphLink | null;
-  onNodeSelect: (node: GraphNode | null) => void;
-  onLinkSelect: (link: GraphLink | null) => void;
+  selectedNodes: GraphNode[];
+  selectedLinks: GraphLink[];
+  onNodeSelect: (node: GraphNode | null, isMulti: boolean) => void;
+  onLinkSelect: (link: GraphLink | null, isMulti: boolean) => void;
   onNodesChange: (nodes: GraphNode[]) => void; // Sync positions back
   onLinkCreate: (sourceId: string, targetId: string) => void;
 }
@@ -16,8 +16,8 @@ interface GraphCanvasProps {
 const GraphCanvas: React.FC<GraphCanvasProps> = ({ 
   data, 
   config, 
-  selectedNode,
-  selectedLink,
+  selectedNodes,
+  selectedLinks,
   onNodeSelect, 
   onLinkSelect,
   onNodesChange,
@@ -33,13 +33,13 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
   const linksRef = useRef<GraphLink[]>([]); 
 
   // Refs to hold latest selection state for D3 event handlers to access
-  const selectedNodeRef = useRef(selectedNode);
-  const selectedLinkRef = useRef(selectedLink);
+  const selectedNodesRef = useRef(selectedNodes);
+  const selectedLinksRef = useRef(selectedLinks);
 
   useEffect(() => {
-    selectedNodeRef.current = selectedNode;
-    selectedLinkRef.current = selectedLink;
-  }, [selectedNode, selectedLink]);
+    selectedNodesRef.current = selectedNodes;
+    selectedLinksRef.current = selectedLinks;
+  }, [selectedNodes, selectedLinks]);
 
   // Handle Resize
   useEffect(() => {
@@ -55,28 +55,19 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
   }, []);
 
   // --- VISUAL & DATA UPDATE EFFECT ---
-  // This effect handles updates to properties (label, color, type) WITHOUT breaking the simulation
-  // It syncs the React 'data' prop into the 'nodesRef' D3 state
   useEffect(() => {
     if (!svgRef.current) return;
 
     // 1. Sync Data properties to D3 state
-    // We want to keep existing D3 nodes (to preserve x,y) but update their data props
-    // If a node is new (not in nodesRef), it will be added in the Main Simulation Effect (below)
-    // If a node is removed, it is handled there too.
-    // This part is mainly for UPDATING existing nodes.
     const currentNodesMap = new Map(nodesRef.current.map(n => [n.id, n]));
     
-    // We iterate over the incoming data to update the ref if it exists
     data.nodes.forEach(newDataNode => {
         const existingNode = currentNodesMap.get(newDataNode.id);
         if (existingNode) {
-            // Update properties in place
             existingNode.label = newDataNode.label;
             existingNode.type = newDataNode.type;
             existingNode.properties = newDataNode.properties;
             existingNode.color = newDataNode.color;
-            // Do NOT update x, y, fx, fy here, let D3 handle those
         }
     });
 
@@ -98,10 +89,8 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
         const currentType = shape.attr("data-type");
         const currentColor = d.color || (d.type === 'table' ? '#3b82f6' : d.type === 'document' ? '#10b981' : '#8b5cf6');
 
-        // Check for Type Change -> Re-render shape
         if (currentType !== d.type) {
             shape.remove();
-            
             let newShape;
             if (d.type === 'table') {
                 newShape = group.insert("rect", ":first-child")
@@ -123,17 +112,15 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 .attr("data-type", d.type)
                 .attr("stroke", "#fff")
                 .attr("stroke-width", 1.5)
-                .attr("fill", currentColor); // Apply color immediately
+                .attr("fill", currentColor);
         } else {
-            // Just update color
             shape.attr("fill", currentColor);
         }
     });
 
-  }, [data]); // Runs on every data change (edit)
+  }, [data]); 
 
   // --- MAIN SIMULATION EFFECT ---
-  // Runs only when TOPOLOGY changes (nodes/links added or removed)
   useEffect(() => {
     if (!svgRef.current) return;
 
@@ -141,16 +128,10 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
     const nodes = data.nodes;
     const links = data.links;
 
-    // Clear previous elements if we are doing a full re-bind
-    // Note: Ideally D3 enter/update/exit pattern handles this without full clear
-    // But for React + D3 simplicity in this specific project structure, full rebuild on topology change is safer
-    // The "update" effect above handles the frequent property changes.
     svg.selectAll("*").remove();
 
-    // Container for zoom
     const container = svg.append("g").attr("class", "zoom-container");
 
-    // Zoom behavior
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
       .on("zoom", (event) => {
@@ -159,15 +140,13 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     svg.call(zoom);
 
-    // Initial Data Clone / Sync
-    // We try to preserve existing simulation node state (x,y) if ID matches
     const previousNodesMap = new Map(nodesRef.current.map(n => [n.id, n]));
     
     nodesRef.current = nodes.map(n => {
       const existing = previousNodesMap.get(n.id);
       if (existing) {
         return { 
-            ...n, // Take new properties
+            ...n, 
             x: existing.x, 
             y: existing.y, 
             vx: existing.vx, 
@@ -176,13 +155,11 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
             fy: existing.fy 
         };
       }
-      return { ...n }; // New node
+      return { ...n }; 
     });
 
-    // Deep copy links to avoid mutating props
     linksRef.current = links.map(l => ({ ...l }));
 
-    // Define Simulation
     const simulation = d3.forceSimulation<GraphNode, GraphLink>(nodesRef.current)
       .force("link", d3.forceLink<GraphNode, GraphLink>(linksRef.current).id(d => d.id).distance(config.distance))
       .force("charge", d3.forceManyBody().strength(config.charge))
@@ -193,7 +170,6 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     // --- DRAWING ---
 
-    // Link Group
     const linkGroup = container.append("g")
       .attr("class", "links")
       .selectAll("g")
@@ -201,23 +177,22 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
       .enter().append("g")
       .on("click", (event, d) => {
         event.stopPropagation();
-        onLinkSelect(d);
+        // Ctrl+Click for multi-select (was Shift)
+        const isMulti = event.ctrlKey || event.metaKey;
+        onLinkSelect(d, isMulti);
       });
 
-    // Invisible thick line for easier clicking
     linkGroup.append("line")
       .attr("stroke", "transparent")
       .attr("stroke-width", 15)
       .attr("class", "hit-area");
 
-    // Visible line
     linkGroup.append("line")
       .attr("class", "visual-link")
       .attr("stroke", "#4b5563")
       .attr("stroke-opacity", 0.6)
       .attr("stroke-width", 2);
     
-    // Link labels
     const linkLabels = container.append("g")
       .attr("class", "link-labels")
       .selectAll("text")
@@ -230,7 +205,6 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
       .attr("dy", -5)
       .style("pointer-events", "none"); 
 
-    // Nodes
     const nodeGroup = container.append("g")
       .attr("class", "nodes")
       .selectAll("g")
@@ -243,15 +217,21 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
       )
       .on("click", (event, d) => {
         event.stopPropagation();
-        const currentSelected = selectedNodeRef.current;
-        if (event.shiftKey && currentSelected && currentSelected.id !== d.id) {
-            onLinkCreate(currentSelected.id, d.id);
+        
+        const selectedNodes = selectedNodesRef.current;
+        const isLinkCreate = event.shiftKey;
+        const isMulti = event.ctrlKey || event.metaKey;
+        
+        // Shift+Click creates links between single selected node and clicked node
+        if (isLinkCreate && selectedNodes.length === 1 && selectedNodes[0].id !== d.id) {
+            onLinkCreate(selectedNodes[0].id, d.id);
             return;
         }
-        onNodeSelect(d);
+        
+        // Ctrl/Cmd+Click does multi selection
+        onNodeSelect(d, isMulti);
       });
 
-    // Node shapes
     nodeGroup.each(function(d) {
       const el = d3.select(this);
       const color = d.color || (d.type === 'table' ? '#3b82f6' : d.type === 'document' ? '#10b981' : '#8b5cf6');
@@ -297,9 +277,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
       .style("pointer-events", "none")
       .style("text-shadow", "0 1px 4px rgba(0,0,0,0.8)");
 
-    // Ticks
     simulation.on("tick", () => {
-      // Grid clamping if enabled
       if (config.grouping === 'grid') {
         const gridSize = 100;
         nodesRef.current.forEach(d => {
@@ -310,7 +288,6 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
         });
       }
 
-      // Update both hit area and visual line
       linkGroup.selectAll("line")
         .attr("x1", (d: any) => d.source.x)
         .attr("y1", (d: any) => d.source.y)
@@ -329,8 +306,17 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
       if (!event.active) simulation.alphaTarget(0.3).restart();
       d.fx = d.x;
       d.fy = d.y;
-      if (!event.sourceEvent.shiftKey) {
-          onNodeSelect(d);
+      
+      const isSelected = selectedNodesRef.current.some(n => n.id === d.id);
+      
+      const isMulti = event.sourceEvent.ctrlKey || event.sourceEvent.metaKey;
+      const isLinkMode = event.sourceEvent.shiftKey;
+      
+      // If NOT selected, and we are NOT in link creation mode (Shift), we handle selection.
+      // If we ARE in link creation mode, we skip selecting here so we don't deselect the source node
+      // before the click handler fires to create the link.
+      if (!isSelected && !isLinkMode) {
+          onNodeSelect(d, isMulti);
       }
     }
 
@@ -346,19 +332,21 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
     return () => {
       simulation.stop();
     };
-  }, [data.nodes.length, data.links.length, dimensions, config.grouping]); // Only run on topology/layout change
+  }, [data.nodes.length, data.links.length, dimensions, config.grouping]);
 
-  // Secondary Effect: Visual Updates for Selection (Does not rebuild DOM)
+  // --- SELECTION VISUALS EFFECT ---
   useEffect(() => {
     if (!svgRef.current) return;
     const svg = d3.select(svgRef.current);
-    const currentNodes = selectedNode ? [selectedNode.id] : [];
-    const currentLink = selectedLink ? selectedLink.id : null;
+    
+    // Create Sets for O(1) lookup
+    const selectedNodeIds = new Set(selectedNodes.map(n => n.id));
+    const selectedLinkIds = new Set(selectedLinks.map(l => l.id));
 
     // Node Selection Visuals
     svg.selectAll(".nodes g").each(function(d: any) {
         const group = d3.select(this);
-        const isSelected = currentNodes.includes(d.id);
+        const isSelected = selectedNodeIds.has(d.id);
         
         // Update shape stroke
         group.select(".node-shape")
@@ -368,7 +356,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
         // Manage Halo
         group.select(".selection-halo").remove(); 
         if (isSelected) {
-            group.insert("circle", ":first-child") // Insert behind
+            group.insert("circle", ":first-child") 
                 .attr("class", "selection-halo")
                 .attr("r", 35)
                 .attr("fill", "none")
@@ -380,15 +368,15 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     // Link Selection Visuals
     svg.selectAll(".links .visual-link")
-       .attr("stroke", (d: any) => (currentLink === d.id) ? "#60a5fa" : "#4b5563")
-       .attr("stroke-opacity", (d: any) => (currentLink === d.id) ? 1 : 0.6)
-       .attr("stroke-width", (d: any) => (currentLink === d.id) ? 3 : 2);
+       .attr("stroke", (d: any) => selectedLinkIds.has(d.id) ? "#60a5fa" : "#4b5563")
+       .attr("stroke-opacity", (d: any) => selectedLinkIds.has(d.id) ? 1 : 0.6)
+       .attr("stroke-width", (d: any) => selectedLinkIds.has(d.id) ? 3 : 2);
 
     svg.selectAll(".link-labels text")
-       .attr("fill", (d: any) => (currentLink === d.id) ? "#93c5fd" : "#9ca3af")
-       .attr("font-weight", (d: any) => (currentLink === d.id) ? "bold" : "normal");
+       .attr("fill", (d: any) => selectedLinkIds.has(d.id) ? "#93c5fd" : "#9ca3af")
+       .attr("font-weight", (d: any) => selectedLinkIds.has(d.id) ? "bold" : "normal");
 
-  }, [selectedNode, selectedLink, data.nodes.length, data.links.length]); 
+  }, [selectedNodes, selectedLinks, data.nodes.length, data.links.length]); 
 
   // Dynamic Updates for config
   useEffect(() => {
@@ -427,9 +415,12 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
     e.preventDefault();
   };
 
-  const handleBgClick = () => {
-      onNodeSelect(null);
-      onLinkSelect(null);
+  const handleBgClick = (e: React.MouseEvent) => {
+      // Pass isMulti logic even for background clicks to support "Ctrl+Click background to NOT deselect"?
+      // Standard behavior is bg click clears. But let's pass it anyway.
+      const isMulti = e.ctrlKey || e.metaKey;
+      onNodeSelect(null, isMulti);
+      onLinkSelect(null, isMulti);
   }
 
   return (

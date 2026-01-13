@@ -31,8 +31,11 @@ const App: React.FC = () => {
   // --- STATE ---
   const [graphData, setGraphData] = useState<GraphData>(INITIAL_DATA);
   const [simulationConfig, setSimulationConfig] = useState<SimulationConfig>(INITIAL_CONFIG);
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [selectedLink, setSelectedLink] = useState<GraphLink | null>(null);
+  
+  // Selection State (Arrays for Multi-select)
+  const [selectedNodes, setSelectedNodes] = useState<GraphNode[]>([]);
+  const [selectedLinks, setSelectedLinks] = useState<GraphLink[]>([]);
+  
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [isAILoading, setIsAILoading] = useState(false);
   
@@ -40,13 +43,12 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<GraphData[]>([INITIAL_DATA]);
   const [historyIndex, setHistoryIndex] = useState(0);
 
-  // Clipboard
-  const [clipboard, setClipboard] = useState<GraphNode | null>(null);
+  // Clipboard (Now stores arrays)
+  const [clipboardNodes, setClipboardNodes] = useState<GraphNode[]>([]);
 
   // --- HELPERS ---
   const getNodeId = (node: string | GraphNode) => typeof node === 'object' ? node.id : node;
 
-  // Refined History Adder
   const recordHistory = (newData: GraphData) => {
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push(newData);
@@ -61,8 +63,8 @@ const App: React.FC = () => {
       const newIndex = historyIndex - 1;
       setHistoryIndex(newIndex);
       setGraphData(history[newIndex]);
-      setSelectedNode(null);
-      setSelectedLink(null);
+      setSelectedNodes([]);
+      setSelectedLinks([]);
     }
   };
 
@@ -71,21 +73,68 @@ const App: React.FC = () => {
       const newIndex = historyIndex + 1;
       setHistoryIndex(newIndex);
       setGraphData(history[newIndex]);
-      setSelectedNode(null);
-      setSelectedLink(null);
+      setSelectedNodes([]);
+      setSelectedLinks([]);
     }
   };
 
-  // --- ACTIONS ---
+  // --- SELECTION ACTIONS ---
 
-  const handleNodeSelect = useCallback((node: GraphNode | null) => {
-    setSelectedNode(node);
-    if (node) setSelectedLink(null);
+  const handleNodeSelect = useCallback((node: GraphNode | null, isMulti: boolean) => {
+    if (!node) {
+      // Background click - clear all unless holding Ctrl (optional, usually bg click clears)
+      if (!isMulti) {
+          setSelectedNodes([]);
+          setSelectedLinks([]);
+      }
+      return;
+    }
+
+    if (isMulti) {
+      // Multi-select logic
+      setSelectedLinks([]); // Enforce same-type rule: Clear links if selecting a node
+      
+      setSelectedNodes(prev => {
+        const exists = prev.find(n => n.id === node.id);
+        if (exists) {
+          // Deselect
+          return prev.filter(n => n.id !== node.id);
+        } else {
+          // Add to selection
+          return [...prev, node];
+        }
+      });
+    } else {
+      // Single select
+      setSelectedLinks([]);
+      setSelectedNodes([node]);
+    }
   }, []);
 
-  const handleLinkSelect = useCallback((link: GraphLink | null) => {
-    setSelectedLink(link);
-    if (link) setSelectedNode(null);
+  const handleLinkSelect = useCallback((link: GraphLink | null, isMulti: boolean) => {
+    if (!link) {
+        if (!isMulti) {
+            setSelectedNodes([]);
+            setSelectedLinks([]);
+        }
+        return;
+    }
+
+    if (isMulti) {
+        setSelectedNodes([]); // Enforce same-type rule: Clear nodes if selecting a link
+        
+        setSelectedLinks(prev => {
+            const exists = prev.find(l => l.id === link.id);
+            if (exists) {
+                return prev.filter(l => l.id !== link.id);
+            } else {
+                return [...prev, link];
+            }
+        });
+    } else {
+        setSelectedNodes([]);
+        setSelectedLinks([link]);
+    }
   }, []);
 
   const handleNodesChange = useCallback((newNodes: GraphNode[]) => {
@@ -95,43 +144,51 @@ const App: React.FC = () => {
     }
   }, [graphData, historyIndex, history]);
 
-  // Property updates don't trigger history to avoid spam, unless we implement debounce
-  const handleUpdateNode = (updatedNode: GraphNode) => {
+  // --- UPDATE ACTIONS (Batch) ---
+
+  const handleUpdateNodes = (updatedNodes: GraphNode[]) => {
+    const updatedIds = new Set(updatedNodes.map(n => n.id));
+    
     setGraphData(prev => ({
       ...prev,
-      nodes: prev.nodes.map(n => n.id === updatedNode.id ? updatedNode : n)
+      nodes: prev.nodes.map(n => updatedIds.has(n.id) ? updatedNodes.find(un => un.id === n.id)! : n)
     }));
-    setSelectedNode(updatedNode);
+    
+    // Update selection state to reflect changes (e.g. if label changed)
+    setSelectedNodes(updatedNodes);
   };
 
-  const handleDeleteNode = (id: string) => {
+  const handleDeleteNodes = (ids: string[]) => {
+    const idSet = new Set(ids);
     const newData = {
-      nodes: graphData.nodes.filter(n => n.id !== id),
+      nodes: graphData.nodes.filter(n => !idSet.has(n.id)),
       links: graphData.links.filter(l => {
           const sId = getNodeId(l.source);
           const tId = getNodeId(l.target);
-          return sId !== id && tId !== id;
+          return !idSet.has(sId) && !idSet.has(tId);
       })
     };
     recordHistory(newData);
-    setSelectedNode(null);
+    setSelectedNodes([]);
   };
 
-  const handleUpdateLink = (updatedLink: GraphLink) => {
+  const handleUpdateLinks = (updatedLinks: GraphLink[]) => {
+    const updatedIds = new Set(updatedLinks.map(l => l.id));
     setGraphData(prev => ({
         ...prev,
-        links: prev.links.map(l => l.id === updatedLink.id ? updatedLink : l)
+        links: prev.links.map(l => updatedIds.has(l.id) ? updatedLinks.find(ul => ul.id === l.id)! : l)
     }));
-    setSelectedLink(updatedLink);
+    setSelectedLinks(updatedLinks);
   };
 
-  const handleDeleteLink = (id: string) => {
+  const handleDeleteLinks = (ids: string[]) => {
+      const idSet = new Set(ids);
       const newData = {
           ...graphData,
-          links: graphData.links.filter(l => l.id !== id)
+          links: graphData.links.filter(l => !idSet.has(l.id))
       };
       recordHistory(newData);
-      setSelectedLink(null);
+      setSelectedLinks([]);
   };
 
   const handleLinkCreate = (sourceId: string, targetId: string) => {
@@ -183,70 +240,83 @@ const App: React.FC = () => {
     }
   };
 
-  // --- COPY / PASTE LOGIC ---
+  // --- COPY / PASTE LOGIC (Batch) ---
   const handleCopy = useCallback(() => {
-      if (selectedNode) {
-          setClipboard(selectedNode);
+      if (selectedNodes.length > 0) {
+          setClipboardNodes(selectedNodes);
       }
-  }, [selectedNode]);
+  }, [selectedNodes]);
 
   const handlePaste = useCallback(() => {
-      if (!clipboard) return;
+      if (clipboardNodes.length === 0) return;
 
-      const newId = `node-${Date.now()}`;
-      const offset = 40; // Pixel offset for the pasted node
-      
-      const newNode: GraphNode = {
-          ...clipboard,
-          id: newId,
-          x: (clipboard.x || 0) + offset,
-          y: (clipboard.y || 0) + offset,
-          label: `${clipboard.label} (Copy)`
-      };
-
-      // Duplicate edges connected to the original clipboard node
+      const newNodes: GraphNode[] = [];
       const newLinks: GraphLink[] = [];
+      const idMapping = new Map<string, string>(); // oldId -> newId
+
+      const offset = 40;
+
+      // 1. Create new nodes
+      clipboardNodes.forEach(node => {
+          const newId = `node-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+          idMapping.set(node.id, newId);
+
+          newNodes.push({
+              ...node,
+              id: newId,
+              x: (node.x || 0) + offset,
+              y: (node.y || 0) + offset,
+              label: `${node.label} (Copy)`
+          });
+      });
+
+      // 2. Duplicate internal edges (edges between copied nodes)
+      // AND edges connected to original nodes if single copy? 
+      // Requirement: "copying copies all the edges of the orginal too"
+      // Interpretation: Copying a node brings its edges. If I paste, I expect the edges to come with it.
+      // Case A: Internal edge (Source and Target are both in clipboard) -> Connect new source to new target.
+      // Case B: External edge (Source in clipboard, Target NOT) -> Connect new source to OLD target.
       
+      const clipboardIds = new Set(clipboardNodes.map(n => n.id));
+
       graphData.links.forEach(link => {
           const sId = getNodeId(link.source);
           const tId = getNodeId(link.target);
           
-          if (sId === clipboard.id) {
-              // Outgoing edge from clipboard node -> create outgoing from new node
-              newLinks.push({
-                  ...link,
-                  id: `link-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                  source: newId,
-                  target: tId === clipboard.id ? newId : tId // Handle self-loop
-              });
-          } else if (tId === clipboard.id) {
-              // Incoming edge to clipboard node -> create incoming to new node
-              newLinks.push({
-                  ...link,
-                  id: `link-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                  source: sId === clipboard.id ? newId : sId, // Handle self-loop
-                  target: newId
-              });
+          const sourceInClipboard = clipboardIds.has(sId);
+          const targetInClipboard = clipboardIds.has(tId);
+
+          if (sourceInClipboard || targetInClipboard) {
+               // Determine new source and target
+               // If it's in the map, use the NEW ID. If not, keep the OLD ID.
+               const newSourceId = idMapping.get(sId) || sId;
+               const newTargetId = idMapping.get(tId) || tId;
+
+               newLinks.push({
+                   ...link,
+                   id: `link-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                   source: newSourceId,
+                   target: newTargetId
+               });
           }
       });
 
       const newData = {
-          nodes: [...graphData.nodes, newNode],
+          nodes: [...graphData.nodes, ...newNodes],
           links: [...graphData.links, ...newLinks]
       };
 
       recordHistory(newData);
-      setSelectedNode(newNode); // Select the newly pasted node
-  }, [clipboard, graphData, history, historyIndex]);
+      setSelectedNodes(newNodes); // Select the newly pasted nodes
+  }, [clipboardNodes, graphData, history, historyIndex]);
 
   // --- KEYBOARD HANDLER ---
   useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
           const target = e.target as HTMLElement;
-          // Skip if user is typing in an input
           if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable) return;
 
-          const isCtrl = e.ctrlKey || e.metaKey; // metaKey for Mac Cmd
+          const isCtrl = e.ctrlKey || e.metaKey; 
 
           if (isCtrl && e.key.toLowerCase() === 'z') {
               e.preventDefault();
@@ -261,14 +331,14 @@ const App: React.FC = () => {
               e.preventDefault();
               handlePaste();
           } else if (e.key === 'Delete' || e.key === 'Backspace') {
-              if (selectedNode) handleDeleteNode(selectedNode.id);
-              if (selectedLink) handleDeleteLink(selectedLink.id);
+              if (selectedNodes.length > 0) handleDeleteNodes(selectedNodes.map(n => n.id));
+              if (selectedLinks.length > 0) handleDeleteLinks(selectedLinks.map(l => l.id));
           }
       };
 
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNode, selectedLink, clipboard, graphData, historyIndex, history]);
+  }, [selectedNodes, selectedLinks, clipboardNodes, graphData, historyIndex, history]);
 
 
   const handleExport = () => {
@@ -329,8 +399,8 @@ const App: React.FC = () => {
         <GraphCanvas 
           data={graphData} 
           config={simulationConfig}
-          selectedNode={selectedNode}
-          selectedLink={selectedLink}
+          selectedNodes={selectedNodes}
+          selectedLinks={selectedLinks}
           onNodeSelect={handleNodeSelect}
           onLinkSelect={handleLinkSelect}
           onNodesChange={handleNodesChange}
@@ -339,12 +409,12 @@ const App: React.FC = () => {
       </div>
 
       <Sidebar 
-        selectedNode={selectedNode}
-        selectedLink={selectedLink}
-        onUpdateNode={handleUpdateNode}
-        onDeleteNode={handleDeleteNode}
-        onUpdateLink={handleUpdateLink}
-        onDeleteLink={handleDeleteLink}
+        selectedNodes={selectedNodes}
+        selectedLinks={selectedLinks}
+        onUpdateNodes={handleUpdateNodes}
+        onDeleteNodes={handleDeleteNodes}
+        onUpdateLinks={handleUpdateLinks}
+        onDeleteLinks={handleDeleteLinks}
       />
 
       <AIGeneratorModal 

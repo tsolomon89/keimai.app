@@ -1,14 +1,14 @@
 import React from 'react';
 import { GraphNode, GraphLink, NodeProperty } from '../types';
-import { Plus, Trash2, Database, FileText, Circle, Link2, Palette } from 'lucide-react';
+import { Plus, Trash2, Database, FileText, Circle, Link2, Palette, Layers } from 'lucide-react';
 
 interface SidebarProps {
-  selectedNode: GraphNode | null;
-  selectedLink: GraphLink | null;
-  onUpdateNode: (node: GraphNode) => void;
-  onDeleteNode: (id: string) => void;
-  onUpdateLink: (link: GraphLink) => void;
-  onDeleteLink: (id: string) => void;
+  selectedNodes: GraphNode[];
+  selectedLinks: GraphLink[];
+  onUpdateNodes: (nodes: GraphNode[]) => void;
+  onDeleteNodes: (ids: string[]) => void;
+  onUpdateLinks: (links: GraphLink[]) => void;
+  onDeleteLinks: (ids: string[]) => void;
 }
 
 const COLORS = [
@@ -30,51 +30,76 @@ const COLORS = [
 ];
 
 const Sidebar: React.FC<SidebarProps> = ({ 
-    selectedNode, 
-    selectedLink,
-    onUpdateNode, 
-    onDeleteNode,
-    onUpdateLink,
-    onDeleteLink
+    selectedNodes, 
+    selectedLinks,
+    onUpdateNodes, 
+    onDeleteNodes,
+    onUpdateLinks,
+    onDeleteLinks
 }) => {
 
   const handleDragStart = (e: React.DragEvent, type: string) => {
     e.dataTransfer.setData("nodeType", type);
   };
 
-  // --- Node Handlers ---
-  const addProperty = () => {
-    if (!selectedNode) return;
-    const currentProps = selectedNode.properties || [];
-    const newProp: NodeProperty = {
-      id: Date.now().toString(),
-      key: 'new_prop',
-      value: '',
-      type: 'string'
-    };
-    onUpdateNode({
-      ...selectedNode,
-      properties: [...currentProps, newProp]
-    });
+  const isMultiNode = selectedNodes.length > 1;
+  const isMultiLink = selectedLinks.length > 1;
+
+  // --- Node Batch Handlers ---
+  
+  const updateNodesField = (field: keyof GraphNode, value: any) => {
+      const updated = selectedNodes.map(n => ({
+          ...n,
+          [field]: value
+      }));
+      onUpdateNodes(updated);
   };
 
-  const updateProperty = (id: string, field: keyof NodeProperty, value: string) => {
-    if (!selectedNode) return;
-    const currentProps = selectedNode.properties || [];
-    const updatedProps = currentProps.map(p => 
-      p.id === id ? { ...p, [field]: value } : p
+  const addPropertyToAll = () => {
+    const updated = selectedNodes.map(n => ({
+        ...n,
+        properties: [
+            ...(n.properties || []),
+            {
+                id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                key: 'new_prop',
+                value: '',
+                type: 'string'
+            }
+        ]
+    }));
+    onUpdateNodes(updated);
+  };
+
+  // Only used for Single Node Selection
+  const updateSingleProperty = (propId: string, field: keyof NodeProperty, value: string) => {
+    if (selectedNodes.length !== 1) return;
+    const node = selectedNodes[0];
+    const updatedProps = (node.properties || []).map(p => 
+      p.id === propId ? { ...p, [field]: value } : p
     );
-    onUpdateNode({ ...selectedNode, properties: updatedProps });
+    onUpdateNodes([{ ...node, properties: updatedProps }]);
   };
 
-  const deleteProperty = (id: string) => {
-    if (!selectedNode) return;
-    const currentProps = selectedNode.properties || [];
-    const updatedProps = currentProps.filter(p => p.id !== id);
-    onUpdateNode({ ...selectedNode, properties: updatedProps });
+  const deleteSingleProperty = (propId: string) => {
+    if (selectedNodes.length !== 1) return;
+    const node = selectedNodes[0];
+    const updatedProps = (node.properties || []).filter(p => p.id !== propId);
+    onUpdateNodes([{ ...node, properties: updatedProps }]);
   };
 
-  const properties = selectedNode?.properties || [];
+  // --- Link Batch Handlers ---
+  const updateLinksField = (field: keyof GraphLink, value: any) => {
+      const updated = selectedLinks.map(l => ({
+          ...l,
+          [field]: value
+      }));
+      onUpdateLinks(updated);
+  };
+
+  // --- Render Helpers ---
+  const firstNode = selectedNodes[0];
+  const firstLink = selectedLinks[0];
 
   return (
     <div className="w-80 h-full bg-gray-900 border-l border-gray-800 flex flex-col shadow-2xl z-10 pt-24">
@@ -113,19 +138,21 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Editor Area */}
       <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
-        {selectedNode ? (
-          // --- NODE EDITOR ---
+        {selectedNodes.length > 0 ? (
+          // --- NODE EDITOR (Single & Multi) ---
           <div className="space-y-6">
             <div>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                    <Circle size={16} className="text-violet-400"/>
-                    <h3 className="text-sm font-semibold text-gray-200">Node Properties</h3>
+                    {isMultiNode ? <Layers size={16} className="text-violet-400"/> : <Circle size={16} className="text-violet-400"/>}
+                    <h3 className="text-sm font-semibold text-gray-200">
+                        {isMultiNode ? `${selectedNodes.length} Nodes Selected` : 'Node Properties'}
+                    </h3>
                 </div>
                 <button 
-                  onClick={() => onDeleteNode(selectedNode.id)}
+                  onClick={() => onDeleteNodes(selectedNodes.map(n => n.id))}
                   className="p-1 hover:bg-red-900/30 text-red-400 rounded transition-colors"
-                  title="Delete Node"
+                  title="Delete Selection"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -133,19 +160,20 @@ const Sidebar: React.FC<SidebarProps> = ({
               
               <div className="space-y-3 mt-4">
                 <div>
-                  <label className="text-xs text-gray-500 block mb-1">Label</label>
+                  <label className="text-xs text-gray-500 block mb-1">Label {isMultiNode && "(Updates All)"}</label>
                   <input 
                     className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none text-white transition-colors"
-                    value={selectedNode.label}
-                    onChange={(e) => onUpdateNode({...selectedNode, label: e.target.value})}
+                    value={isMultiNode ? (selectedNodes.every(n => n.label === firstNode.label) ? firstNode.label : '') : firstNode.label}
+                    placeholder={isMultiNode ? "Mixed Values" : ""}
+                    onChange={(e) => updateNodesField('label', e.target.value)}
                   />
                 </div>
                  <div>
-                  <label className="text-xs text-gray-500 block mb-1">Type</label>
+                  <label className="text-xs text-gray-500 block mb-1">Type {isMultiNode && "(Updates All)"}</label>
                   <select 
                     className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none text-white transition-colors"
-                    value={selectedNode.type}
-                    onChange={(e) => onUpdateNode({...selectedNode, type: e.target.value as any})}
+                    value={isMultiNode ? (selectedNodes.every(n => n.type === firstNode.type) ? firstNode.type : 'node') : firstNode.type}
+                    onChange={(e) => updateNodesField('type', e.target.value as any)}
                   >
                     <option value="node">Generic Node</option>
                     <option value="table">SQL Table</option>
@@ -157,14 +185,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div>
                     <label className="text-xs text-gray-500 block mb-2 flex items-center gap-2">
                         <Palette size={12} />
-                        Color
+                        Color {isMultiNode && "(Updates All)"}
                     </label>
                     <div className="grid grid-cols-5 gap-1.5">
                         {COLORS.map((c) => (
                             <button
                                 key={c.value}
-                                onClick={() => onUpdateNode({...selectedNode, color: c.value})}
-                                className={`w-full aspect-square rounded-full border border-gray-700 hover:scale-110 transition-transform ${selectedNode.color === c.value ? 'ring-2 ring-white ring-offset-1 ring-offset-gray-900' : ''}`}
+                                onClick={() => updateNodesField('color', c.value)}
+                                className={`w-full aspect-square rounded-full border border-gray-700 hover:scale-110 transition-transform ${(!isMultiNode && firstNode.color === c.value) ? 'ring-2 ring-white ring-offset-1 ring-offset-gray-900' : ''}`}
                                 style={{ backgroundColor: c.value }}
                                 title={c.name}
                             />
@@ -173,8 +201,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                              <input 
                                 type="color" 
                                 className="absolute inset-0 w-[150%] h-[150%] -top-1/4 -left-1/4 cursor-pointer"
-                                value={selectedNode.color || '#8b5cf6'}
-                                onChange={(e) => onUpdateNode({...selectedNode, color: e.target.value})}
+                                value={firstNode.color || '#8b5cf6'}
+                                onChange={(e) => updateNodesField('color', e.target.value)}
                              />
                          </div>
                     </div>
@@ -185,58 +213,69 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="border-t border-gray-800 pt-4">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-semibold text-gray-400">Schema Fields</span>
-                <button onClick={addProperty} className="p-1 hover:bg-gray-700 rounded text-blue-400 transition-colors">
+                <button onClick={addPropertyToAll} className="p-1 hover:bg-gray-700 rounded text-blue-400 transition-colors" title="Add property to all selected">
                   <Plus size={14} />
                 </button>
               </div>
               
-              <div className="space-y-2">
-                {properties.map(prop => (
-                  <div key={prop.id} className="flex gap-1 items-start bg-gray-800/50 p-2 rounded group border border-transparent hover:border-gray-700 transition-colors">
-                    <div className="flex-1 space-y-1">
-                      <input 
-                        className="w-full bg-transparent border-none p-0 text-xs font-medium text-blue-300 placeholder-blue-300/30 focus:outline-none" 
-                        placeholder="Key"
-                        value={prop.key}
-                        onChange={(e) => updateProperty(prop.id, 'key', e.target.value)}
-                      />
-                      <div className="flex gap-1">
-                        <input 
-                          className="flex-1 bg-transparent border-none p-0 text-[10px] text-gray-400 placeholder-gray-600 focus:outline-none" 
-                          placeholder="Type (e.g. string)"
-                          value={prop.type}
-                          onChange={(e) => updateProperty(prop.id, 'type', e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <button 
-                      onClick={() => deleteProperty(prop.id)}
-                      className="opacity-0 group-hover:opacity-100 p-1 text-gray-500 hover:text-red-400 transition-all"
-                    >
-                      <Trash2 size={12} />
-                    </button>
+              {isMultiNode ? (
+                  <div className="text-xs text-gray-500 italic text-center py-4 bg-gray-800/20 rounded">
+                      Detailed property editing is disabled in multi-select mode. 
+                      <br/>
+                      <br/>
+                      Clicking <strong>+</strong> adds a new property to all selected nodes.
                   </div>
-                ))}
-                {properties.length === 0 && (
-                   <div className="text-center py-4 text-xs text-gray-600 italic border border-dashed border-gray-800 rounded">
-                      No properties defined
-                   </div>
-                )}
-              </div>
+              ) : (
+                <div className="space-y-2">
+                    {(firstNode.properties || []).map(prop => (
+                    <div key={prop.id} className="flex gap-1 items-start bg-gray-800/50 p-2 rounded group border border-transparent hover:border-gray-700 transition-colors">
+                        <div className="flex-1 space-y-1">
+                        <input 
+                            className="w-full bg-transparent border-none p-0 text-xs font-medium text-blue-300 placeholder-blue-300/30 focus:outline-none" 
+                            placeholder="Key"
+                            value={prop.key}
+                            onChange={(e) => updateSingleProperty(prop.id, 'key', e.target.value)}
+                        />
+                        <div className="flex gap-1">
+                            <input 
+                            className="flex-1 bg-transparent border-none p-0 text-[10px] text-gray-400 placeholder-gray-600 focus:outline-none" 
+                            placeholder="Type (e.g. string)"
+                            value={prop.type}
+                            onChange={(e) => updateSingleProperty(prop.id, 'type', e.target.value)}
+                            />
+                        </div>
+                        </div>
+                        <button 
+                        onClick={() => deleteSingleProperty(prop.id)}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-gray-500 hover:text-red-400 transition-all"
+                        >
+                        <Trash2 size={12} />
+                        </button>
+                    </div>
+                    ))}
+                    {(firstNode.properties || []).length === 0 && (
+                    <div className="text-center py-4 text-xs text-gray-600 italic border border-dashed border-gray-800 rounded">
+                        No properties defined
+                    </div>
+                    )}
+                </div>
+              )}
             </div>
           </div>
-        ) : selectedLink ? (
-            // --- LINK EDITOR ---
+        ) : selectedLinks.length > 0 ? (
+            // --- LINK EDITOR (Single & Multi) ---
             <div className="space-y-6">
                 <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                        <Link2 size={16} className="text-blue-400"/>
-                        <h3 className="text-sm font-semibold text-gray-200">Link Properties</h3>
+                        {isMultiLink ? <Layers size={16} className="text-blue-400"/> : <Link2 size={16} className="text-blue-400"/>}
+                        <h3 className="text-sm font-semibold text-gray-200">
+                             {isMultiLink ? `${selectedLinks.length} Links Selected` : 'Link Properties'}
+                        </h3>
                     </div>
                     <button 
-                    onClick={() => onDeleteLink(selectedLink.id)}
+                    onClick={() => onDeleteLinks(selectedLinks.map(l => l.id))}
                     className="p-1 hover:bg-red-900/30 text-red-400 rounded transition-colors"
-                    title="Delete Link"
+                    title="Delete Selection"
                     >
                     <Trash2 size={14} />
                     </button>
@@ -244,21 +283,21 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                 <div className="space-y-4 mt-4">
                     <div>
-                        <label className="text-xs text-gray-500 block mb-1">Label (Relationship)</label>
+                        <label className="text-xs text-gray-500 block mb-1">Label {isMultiLink && "(Updates All)"}</label>
                         <input 
                             className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none text-white transition-colors"
-                            value={selectedLink.label}
-                            onChange={(e) => onUpdateLink({...selectedLink, label: e.target.value})}
-                            placeholder="e.g. AUTHORED"
+                            value={isMultiLink ? (selectedLinks.every(l => l.label === firstLink.label) ? firstLink.label : '') : firstLink.label}
+                            onChange={(e) => updateLinksField('label', e.target.value)}
+                            placeholder={isMultiLink ? "Mixed Values" : "e.g. AUTHORED"}
                         />
                     </div>
                     <div>
-                        <label className="text-xs text-gray-500 block mb-1">Type (Optional)</label>
+                        <label className="text-xs text-gray-500 block mb-1">Type {isMultiLink && "(Updates All)"}</label>
                         <input 
                             className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none text-white transition-colors"
-                            value={selectedLink.type || ''}
-                            onChange={(e) => onUpdateLink({...selectedLink, type: e.target.value})}
-                            placeholder="e.g. one-to-many"
+                            value={isMultiLink ? (selectedLinks.every(l => l.type === firstLink.type) ? (firstLink.type || '') : '') : (firstLink.type || '')}
+                            onChange={(e) => updateLinksField('type', e.target.value)}
+                            placeholder={isMultiLink ? "Mixed Values" : "e.g. one-to-many"}
                         />
                     </div>
                 </div>
@@ -274,7 +313,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               <Circle size={32} className="opacity-20" />
             </div>
             <p className="text-sm font-medium text-gray-500">No Element Selected</p>
-            <p className="text-xs text-gray-600 text-center max-w-[200px]">Select a node or link to edit properties, or drag new nodes from the library.</p>
+            <p className="text-xs text-gray-600 text-center max-w-[200px]">Select nodes or links (hold Ctrl/Cmd to select multiple) or Shift+Click to connect.</p>
           </div>
         )}
       </div>
