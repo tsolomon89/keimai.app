@@ -36,10 +36,18 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
   const selectedNodesRef = useRef(selectedNodes);
   const selectedLinksRef = useRef(selectedLinks);
 
+  // Refs to hold latest callbacks for D3 event handlers to access (to avoid stale closures)
+  const onNodeSelectRef = useRef(onNodeSelect);
+  const onLinkSelectRef = useRef(onLinkSelect);
+  const onLinkCreateRef = useRef(onLinkCreate);
+
   useEffect(() => {
     selectedNodesRef.current = selectedNodes;
     selectedLinksRef.current = selectedLinks;
-  }, [selectedNodes, selectedLinks]);
+    onNodeSelectRef.current = onNodeSelect;
+    onLinkSelectRef.current = onLinkSelect;
+    onLinkCreateRef.current = onLinkCreate;
+  }, [selectedNodes, selectedLinks, onNodeSelect, onLinkSelect, onLinkCreate]);
 
   // Handle Resize
   useEffect(() => {
@@ -179,7 +187,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
         event.stopPropagation();
         // Ctrl+Click for multi-select (was Shift)
         const isMulti = event.ctrlKey || event.metaKey;
-        onLinkSelect(d, isMulti);
+        onLinkSelectRef.current(d, isMulti);
       });
 
     linkGroup.append("line")
@@ -224,12 +232,12 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
         
         // Shift+Click creates links between single selected node and clicked node
         if (isLinkCreate && selectedNodes.length === 1 && selectedNodes[0].id !== d.id) {
-            onLinkCreate(selectedNodes[0].id, d.id);
+            onLinkCreateRef.current(selectedNodes[0].id, d.id);
             return;
         }
         
         // Ctrl/Cmd+Click does multi selection
-        onNodeSelect(d, isMulti);
+        onNodeSelectRef.current(d, isMulti);
       });
 
     nodeGroup.each(function(d) {
@@ -316,7 +324,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
       // If we ARE in link creation mode, we skip selecting here so we don't deselect the source node
       // before the click handler fires to create the link.
       if (!isSelected && !isLinkMode) {
-          onNodeSelect(d, isMulti);
+          onNodeSelectRef.current(d, isMulti);
       }
     }
 
