@@ -25,6 +25,7 @@ export interface GraphLink {
   target: string | GraphNode;
   label: string;
   type?: string;
+  properties?: NodeProperty[];
 }
 
 export interface GraphData {

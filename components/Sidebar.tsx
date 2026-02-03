@@ -97,6 +97,38 @@ const Sidebar: React.FC<SidebarProps> = ({
       onUpdateLinks(updated);
   };
 
+  const addPropertyToAllLinks = () => {
+    const updated = selectedLinks.map(l => ({
+        ...l,
+        properties: [
+            ...(l.properties || []),
+            {
+                id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                key: 'new_prop',
+                value: '',
+                type: 'string'
+            }
+        ]
+    }));
+    onUpdateLinks(updated);
+  };
+
+  const updateSingleLinkProperty = (propId: string, field: keyof NodeProperty, value: string) => {
+    if (selectedLinks.length !== 1) return;
+    const link = selectedLinks[0];
+    const updatedProps = (link.properties || []).map(p => 
+      p.id === propId ? { ...p, [field]: value } : p
+    );
+    onUpdateLinks([{ ...link, properties: updatedProps }]);
+  };
+
+  const deleteSingleLinkProperty = (propId: string) => {
+    if (selectedLinks.length !== 1) return;
+    const link = selectedLinks[0];
+    const updatedProps = (link.properties || []).filter(p => p.id !== propId);
+    onUpdateLinks([{ ...link, properties: updatedProps }]);
+  };
+
   // --- Render Helpers ---
   const firstNode = selectedNodes[0];
   const firstLink = selectedLinks[0];
@@ -265,41 +297,96 @@ const Sidebar: React.FC<SidebarProps> = ({
         ) : selectedLinks.length > 0 ? (
             // --- LINK EDITOR (Single & Multi) ---
             <div className="space-y-6">
-                <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                        {isMultiLink ? <Layers size={16} className="text-blue-400"/> : <Link2 size={16} className="text-blue-400"/>}
-                        <h3 className="text-sm font-semibold text-gray-200">
-                             {isMultiLink ? `${selectedLinks.length} Links Selected` : 'Link Properties'}
-                        </h3>
+                <div>
+                    <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                            {isMultiLink ? <Layers size={16} className="text-blue-400"/> : <Link2 size={16} className="text-blue-400"/>}
+                            <h3 className="text-sm font-semibold text-gray-200">
+                                {isMultiLink ? `${selectedLinks.length} Links Selected` : 'Link Properties'}
+                            </h3>
+                        </div>
+                        <button 
+                        onClick={() => onDeleteLinks(selectedLinks.map(l => l.id))}
+                        className="p-1 hover:bg-red-900/30 text-red-400 rounded transition-colors"
+                        title="Delete Selection"
+                        >
+                        <Trash2 size={14} />
+                        </button>
                     </div>
-                    <button 
-                    onClick={() => onDeleteLinks(selectedLinks.map(l => l.id))}
-                    className="p-1 hover:bg-red-900/30 text-red-400 rounded transition-colors"
-                    title="Delete Selection"
-                    >
-                    <Trash2 size={14} />
-                    </button>
+
+                    <div className="space-y-4 mt-4">
+                        <div>
+                            <label className="text-xs text-gray-500 block mb-1">Label {isMultiLink && "(Updates All)"}</label>
+                            <input 
+                                className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none text-white transition-colors"
+                                value={isMultiLink ? (selectedLinks.every(l => l.label === firstLink.label) ? firstLink.label : '') : firstLink.label}
+                                onChange={(e) => updateLinksField('label', e.target.value)}
+                                placeholder={isMultiLink ? "Mixed Values" : "e.g. AUTHORED"}
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs text-gray-500 block mb-1">Type {isMultiLink && "(Updates All)"}</label>
+                            <input 
+                                className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none text-white transition-colors"
+                                value={isMultiLink ? (selectedLinks.every(l => l.type === firstLink.type) ? (firstLink.type || '') : '') : (firstLink.type || '')}
+                                onChange={(e) => updateLinksField('type', e.target.value)}
+                                placeholder={isMultiLink ? "Mixed Values" : "e.g. one-to-many"}
+                            />
+                        </div>
+                    </div>
                 </div>
 
-                <div className="space-y-4 mt-4">
-                    <div>
-                        <label className="text-xs text-gray-500 block mb-1">Label {isMultiLink && "(Updates All)"}</label>
-                        <input 
-                            className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none text-white transition-colors"
-                            value={isMultiLink ? (selectedLinks.every(l => l.label === firstLink.label) ? firstLink.label : '') : firstLink.label}
-                            onChange={(e) => updateLinksField('label', e.target.value)}
-                            placeholder={isMultiLink ? "Mixed Values" : "e.g. AUTHORED"}
-                        />
+                {/* Link Schema Fields */}
+                <div className="border-t border-gray-800 pt-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <span className="text-xs font-semibold text-gray-400">Schema Fields</span>
+                        <button onClick={addPropertyToAllLinks} className="p-1 hover:bg-gray-700 rounded text-blue-400 transition-colors" title="Add property to all selected">
+                        <Plus size={14} />
+                        </button>
                     </div>
-                    <div>
-                        <label className="text-xs text-gray-500 block mb-1">Type {isMultiLink && "(Updates All)"}</label>
-                        <input 
-                            className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none text-white transition-colors"
-                            value={isMultiLink ? (selectedLinks.every(l => l.type === firstLink.type) ? (firstLink.type || '') : '') : (firstLink.type || '')}
-                            onChange={(e) => updateLinksField('type', e.target.value)}
-                            placeholder={isMultiLink ? "Mixed Values" : "e.g. one-to-many"}
-                        />
-                    </div>
+                    
+                    {isMultiLink ? (
+                        <div className="text-xs text-gray-500 italic text-center py-4 bg-gray-800/20 rounded">
+                            Detailed property editing is disabled in multi-select mode. 
+                            <br/>
+                            <br/>
+                            Clicking <strong>+</strong> adds a new property to all selected links.
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            {(firstLink.properties || []).map(prop => (
+                            <div key={prop.id} className="flex gap-1 items-start bg-gray-800/50 p-2 rounded group border border-transparent hover:border-gray-700 transition-colors">
+                                <div className="flex-1 space-y-1">
+                                <input 
+                                    className="w-full bg-transparent border-none p-0 text-xs font-medium text-blue-300 placeholder-blue-300/30 focus:outline-none" 
+                                    placeholder="Key"
+                                    value={prop.key}
+                                    onChange={(e) => updateSingleLinkProperty(prop.id, 'key', e.target.value)}
+                                />
+                                <div className="flex gap-1">
+                                    <input 
+                                    className="flex-1 bg-transparent border-none p-0 text-[10px] text-gray-400 placeholder-gray-600 focus:outline-none" 
+                                    placeholder="Type (e.g. string)"
+                                    value={prop.type}
+                                    onChange={(e) => updateSingleLinkProperty(prop.id, 'type', e.target.value)}
+                                    />
+                                </div>
+                                </div>
+                                <button 
+                                onClick={() => deleteSingleLinkProperty(prop.id)}
+                                className="opacity-0 group-hover:opacity-100 p-1 text-gray-500 hover:text-red-400 transition-all"
+                                >
+                                <Trash2 size={12} />
+                                </button>
+                            </div>
+                            ))}
+                            {(firstLink.properties || []).length === 0 && (
+                            <div className="text-center py-4 text-xs text-gray-600 italic border border-dashed border-gray-800 rounded">
+                                No properties defined
+                            </div>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <div className="mt-8 p-3 bg-gray-800/30 rounded text-xs text-gray-500 leading-relaxed border border-gray-800">

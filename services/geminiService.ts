@@ -36,7 +36,8 @@ const getSchemaFromAI = async (prompt: string, currentSchema: GraphData | undefi
       id: string (unique),
       source: string (id of source node),
       target: string (id of target node),
-      label: string (relationship name, e.g., 'AUTHORED', 'CONTAINS')
+      label: string (relationship name, e.g., 'AUTHORED', 'CONTAINS'),
+      properties: [{ id: string, key: string, value: string, type: string }]
     }
   `;
 
@@ -52,7 +53,8 @@ const getSchemaFromAI = async (prompt: string, currentSchema: GraphData | undefi
         id: l.id, 
         source: typeof l.source === 'object' ? (l.source as GraphNode).id : l.source, 
         target: typeof l.target === 'object' ? (l.target as GraphNode).id : l.target, 
-        label: l.label 
+        label: l.label,
+        properties: l.properties || []
     }))
   } : null;
 
@@ -114,7 +116,19 @@ const getSchemaFromAI = async (prompt: string, currentSchema: GraphData | undefi
                             id: { type: Type.STRING },
                             source: { type: Type.STRING },
                             target: { type: Type.STRING },
-                            label: { type: Type.STRING }
+                            label: { type: Type.STRING },
+                            properties: {
+                                type: Type.ARRAY,
+                                items: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        id: { type: Type.STRING },
+                                        key: { type: Type.STRING },
+                                        value: { type: Type.STRING },
+                                        type: { type: Type.STRING }
+                                    }
+                                }
+                            }
                         },
                         required: ['id', 'source', 'target', 'label']
                     }

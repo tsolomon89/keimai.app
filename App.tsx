@@ -13,9 +13,9 @@ const INITIAL_DATA: GraphData = {
     { id: '3', label: 'Comment', type: 'document', properties: [] },
   ],
   links: [
-    { id: 'l1', source: '1', target: '2', label: 'AUTHORED' },
-    { id: 'l2', source: '1', target: '3', label: 'WROTE' },
-    { id: 'l3', source: '3', target: '2', label: 'ON' },
+    { id: 'l1', source: '1', target: '2', label: 'AUTHORED', properties: [] },
+    { id: 'l2', source: '1', target: '3', label: 'WROTE', properties: [] },
+    { id: 'l3', source: '3', target: '2', label: 'ON', properties: [] },
   ]
 };
 
@@ -199,7 +199,8 @@ const App: React.FC = () => {
         id: `link-${Date.now()}`,
         source: sourceId,
         target: targetId,
-        label: 'RELATED_TO'
+        label: 'RELATED_TO',
+        properties: []
     };
     const newData = {
         ...graphData,
@@ -341,11 +342,13 @@ const App: React.FC = () => {
   const handleExport = () => {
     const exportData = {
         nodes: graphData.nodes.map(({ id, label, type, properties, x, y }) => ({ id, label, type, properties, x, y })),
-        links: graphData.links.map(({ id, source, target, label }) => ({ 
+        links: graphData.links.map(({ id, source, target, label, type, properties }) => ({ 
             id, 
             source: getNodeId(source), 
             target: getNodeId(target), 
-            label 
+            label,
+            type,
+            properties
         }))
     };
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
