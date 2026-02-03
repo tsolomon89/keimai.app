@@ -138,11 +138,14 @@ const App: React.FC = () => {
   }, []);
 
   const handleNodesChange = useCallback((newNodes: GraphNode[]) => {
-    if (newNodes.length !== graphData.nodes.length) {
-       const newData = { ...graphData, nodes: newNodes };
-       recordHistory(newData);
-    }
-  }, [graphData, historyIndex, history]);
+      // Always accept updates from GraphCanvas (e.g. drag end)
+      const newData = { ...graphData, nodes: newNodes };
+      // Note: We might want to throttle history recording for pure drags, but for now strict recording ensures consistency
+      // To prevent history spam, we could check if positions CHANGED significantly, but D3 drag always changes them.
+      // A simple optimization: don't record history, just set state. Only record history on 'drop' or explicit action?
+      // For now, let's just setGraphData to keep UI in sync. History can be handled if we want "Undo Move".
+      setGraphData(newData);
+  }, [graphData]);
 
   // --- UPDATE ACTIONS (Batch) ---
 
@@ -271,12 +274,6 @@ const App: React.FC = () => {
       });
 
       // 2. Duplicate internal edges (edges between copied nodes)
-      // AND edges connected to original nodes if single copy? 
-      // Requirement: "copying copies all the edges of the orginal too"
-      // Interpretation: Copying a node brings its edges. If I paste, I expect the edges to come with it.
-      // Case A: Internal edge (Source and Target are both in clipboard) -> Connect new source to new target.
-      // Case B: External edge (Source in clipboard, Target NOT) -> Connect new source to OLD target.
-      
       const clipboardIds = new Set(clipboardNodes.map(n => n.id));
 
       graphData.links.forEach(link => {

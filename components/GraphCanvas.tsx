@@ -59,7 +59,9 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
     if (!svgRef.current) return;
 
     // 1. Sync Data properties to D3 state
-    const currentNodesMap = new Map(nodesRef.current.map(n => [n.id, n]));
+    const currentNodesMap = new Map<string, GraphNode>(
+        nodesRef.current.map(n => [n.id, n] as [string, GraphNode])
+    );
     
     data.nodes.forEach(newDataNode => {
         const existingNode = currentNodesMap.get(newDataNode.id);
@@ -68,6 +70,18 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
             existingNode.type = newDataNode.type;
             existingNode.properties = newDataNode.properties;
             existingNode.color = newDataNode.color;
+        }
+    });
+
+    // Sync Link properties
+    const currentLinksMap = new Map<string, GraphLink>(
+        linksRef.current.map(l => [l.id, l] as [string, GraphLink])
+    );
+    data.links.forEach(newDataLink => {
+        const existingLink = currentLinksMap.get(newDataLink.id);
+        if (existingLink) {
+            existingLink.label = newDataLink.label;
+            existingLink.type = newDataLink.type;
         }
     });
 
@@ -126,9 +140,38 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     const svg = d3.select(svgRef.current);
     const nodes = data.nodes;
-    const links = data.links;
+    
+    // Create link copies to avoid mutating props, but we need to track them
+    const linksCopy = data.links.map(l => ({ ...l }));
 
     svg.selectAll("*").remove();
+
+    // --- MARKERS ---
+    const defs = svg.append("defs");
+    
+    defs.append("marker")
+        .attr("id", "arrow")
+        .attr("viewBox", "0 -5 10 10")
+        .attr("refX", 28)
+        .attr("refY", 0)
+        .attr("markerWidth", 6)
+        .attr("markerHeight", 6)
+        .attr("orient", "auto")
+        .append("path")
+        .attr("d", "M0,-5L10,0L0,5")
+        .attr("fill", "#6b7280"); // gray-500
+
+    defs.append("marker")
+        .attr("id", "arrow-selected")
+        .attr("viewBox", "0 -5 10 10")
+        .attr("refX", 28)
+        .attr("refY", 0)
+        .attr("markerWidth", 6)
+        .attr("markerHeight", 6)
+        .attr("orient", "auto")
+        .append("path")
+        .attr("d", "M0,-5L10,0L0,5")
+        .attr("fill", "#60a5fa"); // blue-400
 
     const container = svg.append("g").attr("class", "zoom-container");
 
@@ -140,7 +183,35 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     svg.call(zoom);
 
-    const previousNodesMap = new Map(nodesRef.current.map(n => [n.id, n]));
+    // --- TOPOLOGY CALCULATION ---
+    // Identify multi-links to calculate curvature
+    const pairCounts = new Map<string, number>();
+    
+    linksCopy.forEach(link => {
+        // Source/Target are strings at this phase
+        const sid = link.source as string;
+        const tid = link.target as string;
+        const key = sid < tid ? `${sid}:${tid}` : `${tid}:${sid}`;
+        pairCounts.set(key, (pairCounts.get(key) || 0) + 1);
+    });
+
+    const pairIndices = new Map<string, number>();
+    linksCopy.forEach((link: any) => {
+        const sid = link.source as string;
+        const tid = link.target as string;
+        const key = sid < tid ? `${sid}:${tid}` : `${tid}:${sid}`;
+        const count = pairCounts.get(key)!;
+        const index = pairIndices.get(key) || 0;
+        
+        link.linkNum = index;
+        link.totalLinks = count;
+        
+        pairIndices.set(key, index + 1);
+    });
+
+    const previousNodesMap = new Map<string, GraphNode>(
+        nodesRef.current.map(n => [n.id, n] as [string, GraphNode])
+    );
     
     nodesRef.current = nodes.map(n => {
       const existing = previousNodesMap.get(n.id);
@@ -158,7 +229,7 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
       return { ...n }; 
     });
 
-    linksRef.current = links.map(l => ({ ...l }));
+    linksRef.current = linksCopy;
 
     const simulation = d3.forceSimulation<GraphNode, GraphLink>(nodesRef.current)
       .force("link", d3.forceLink<GraphNode, GraphLink>(linksRef.current).id(d => d.id).distance(config.distance))
@@ -177,21 +248,25 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
       .enter().append("g")
       .on("click", (event, d) => {
         event.stopPropagation();
-        // Ctrl+Click for multi-select (was Shift)
         const isMulti = event.ctrlKey || event.metaKey;
         onLinkSelect(d, isMulti);
       });
 
-    linkGroup.append("line")
+    // Hit Area (Thicker, transparent)
+    linkGroup.append("path")
+      .attr("class", "hit-area")
       .attr("stroke", "transparent")
       .attr("stroke-width", 15)
-      .attr("class", "hit-area");
+      .attr("fill", "none");
 
-    linkGroup.append("line")
+    // Visual Line
+    linkGroup.append("path")
       .attr("class", "visual-link")
       .attr("stroke", "#4b5563")
       .attr("stroke-opacity", 0.6)
-      .attr("stroke-width", 2);
+      .attr("stroke-width", 2)
+      .attr("fill", "none")
+      .attr("marker-end", "url(#arrow)");
     
     const linkLabels = container.append("g")
       .attr("class", "link-labels")
@@ -222,13 +297,11 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
         const isLinkCreate = event.shiftKey;
         const isMulti = event.ctrlKey || event.metaKey;
         
-        // Shift+Click creates links between single selected node and clicked node
         if (isLinkCreate && selectedNodes.length === 1 && selectedNodes[0].id !== d.id) {
             onLinkCreate(selectedNodes[0].id, d.id);
             return;
         }
         
-        // Ctrl/Cmd+Click does multi selection
         onNodeSelect(d, isMulti);
       });
 
@@ -288,18 +361,117 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
         });
       }
 
-      linkGroup.selectAll("line")
-        .attr("x1", (d: any) => d.source.x)
-        .attr("y1", (d: any) => d.source.y)
-        .attr("x2", (d: any) => d.target.x)
-        .attr("y2", (d: any) => d.target.y);
+      // Update Path D attribute for curves
+      linkGroup.selectAll("path")
+        .attr("d", (d: any) => {
+             const source = d.source as GraphNode;
+             const target = d.target as GraphNode;
+             
+             // Check if nodes have coordinates (initial simulation step might be NaN)
+             if (source.x === undefined || source.y === undefined || target.x === undefined || target.y === undefined) return "";
 
+             // Self Link
+             if (source.id === target.id) {
+                 const x = source.x;
+                 const y = source.y;
+                 // Dynamic self-link geometry
+                 return `M${x-10},${y-15} C${x-40},${y-50} ${x+40},${y-50} ${x+10},${y-15}`;
+             }
+             
+             // Single Link - Straight
+             if (d.totalLinks === 1) {
+                 return `M${source.x},${source.y} L${target.x},${target.y}`;
+             }
+
+             // Multi Link - Quadratic Bezier
+             const dx = target.x - source.x;
+             const dy = target.y - source.y;
+             const dr = Math.sqrt(dx * dx + dy * dy);
+             
+             if (dr === 0) return "";
+             
+             const gap = 30; // Spacing between curves
+             // Calculate offset based on index
+             let offset = (d.linkNum - (d.totalLinks - 1) / 2) * gap;
+             
+             // Check direction to maintain consistent bundling
+             const isFlipped = source.id > target.id;
+             if (isFlipped) {
+                 offset = -offset;
+             }
+
+             // Control Point Calculation
+             const mx = (source.x + target.x) / 2;
+             const my = (source.y + target.y) / 2;
+             
+             // Normal Vector (-dy, dx)
+             const nx = -dy / dr;
+             const ny = dx / dr;
+             
+             const cx = mx + nx * offset;
+             const cy = my + ny * offset;
+             
+             return `M${source.x},${source.y} Q${cx},${cy} ${target.x},${target.y}`;
+        });
+
+      // Update Label Positions (Midpoint of curve)
       linkLabels
-        .attr("x", d => ((d.source as GraphNode).x! + (d.target as GraphNode).x!) / 2)
-        .attr("y", d => ((d.source as GraphNode).y! + (d.target as GraphNode).y!) / 2);
+        .attr("x", (d: any) => {
+            const source = d.source as GraphNode;
+            const target = d.target as GraphNode;
+            
+            if (source.x === undefined || target.x === undefined) return 0;
+            if (source.id === target.id) return source.x!;
+            
+            if (d.totalLinks === 1) {
+                return (source.x! + target.x!) / 2;
+            }
+            
+            // Curve midpoint calculation
+            const dx = target.x! - source.x!;
+            const dy = target.y! - source.y!;
+            const dr = Math.sqrt(dx*dx + dy*dy);
+            if (dr === 0) return source.x!;
+            
+            const gap = 30;
+            let offset = (d.linkNum - (d.totalLinks - 1) / 2) * gap;
+            if (source.id > target.id) offset = -offset;
+            
+            const mx = (source.x! + target.x!) / 2;
+            const nx = -dy / dr;
+            // Midpoint of quadratic bezier is at t=0.5 -> M + 0.5 * offset * Normal
+            return mx + nx * offset * 0.5;
+        })
+        .attr("y", (d: any) => {
+            const source = d.source as GraphNode;
+            const target = d.target as GraphNode;
+            
+            if (source.y === undefined || target.y === undefined) return 0;
+            if (source.id === target.id) return source.y! - 50;
+
+            if (d.totalLinks === 1) {
+                return (source.y! + target.y!) / 2;
+            }
+
+            const dx = target.x! - source.x!;
+            const dy = target.y! - source.y!;
+            const dr = Math.sqrt(dx*dx + dy*dy);
+            if (dr === 0) return source.y!;
+            
+            const gap = 30;
+            let offset = (d.linkNum - (d.totalLinks - 1) / 2) * gap;
+            if (source.id > target.id) offset = -offset;
+            
+            const my = (source.y! + target.y!) / 2;
+            const ny = dx / dr;
+            return my + ny * offset * 0.5;
+        });
 
       nodeGroup
-        .attr("transform", d => `translate(${d.x},${d.y})`);
+        .attr("transform", d => {
+             if (d.x === undefined || d.y === undefined) return "";
+             return `translate(${d.x},${d.y})`;
+        });
     });
 
     function dragstarted(event: any, d: GraphNode) {
@@ -312,9 +484,6 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
       const isMulti = event.sourceEvent.ctrlKey || event.sourceEvent.metaKey;
       const isLinkMode = event.sourceEvent.shiftKey;
       
-      // If NOT selected, and we are NOT in link creation mode (Shift), we handle selection.
-      // If we ARE in link creation mode, we skip selecting here so we don't deselect the source node
-      // before the click handler fires to create the link.
       if (!isSelected && !isLinkMode) {
           onNodeSelect(d, isMulti);
       }
@@ -327,6 +496,8 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     function dragended(event: any, d: GraphNode) {
       if (!event.active) simulation.alphaTarget(0);
+      // Persist the new positions
+      onNodesChange(nodesRef.current);
     }
 
     return () => {
@@ -370,7 +541,8 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
     svg.selectAll(".links .visual-link")
        .attr("stroke", (d: any) => selectedLinkIds.has(d.id) ? "#60a5fa" : "#4b5563")
        .attr("stroke-opacity", (d: any) => selectedLinkIds.has(d.id) ? 1 : 0.6)
-       .attr("stroke-width", (d: any) => selectedLinkIds.has(d.id) ? 3 : 2);
+       .attr("stroke-width", (d: any) => selectedLinkIds.has(d.id) ? 3 : 2)
+       .attr("marker-end", (d: any) => selectedLinkIds.has(d.id) ? "url(#arrow-selected)" : "url(#arrow)");
 
     svg.selectAll(".link-labels text")
        .attr("fill", (d: any) => selectedLinkIds.has(d.id) ? "#93c5fd" : "#9ca3af")
@@ -416,8 +588,6 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
   };
 
   const handleBgClick = (e: React.MouseEvent) => {
-      // Pass isMulti logic even for background clicks to support "Ctrl+Click background to NOT deselect"?
-      // Standard behavior is bg click clears. But let's pass it anyway.
       const isMulti = e.ctrlKey || e.metaKey;
       onNodeSelect(null, isMulti);
       onLinkSelect(null, isMulti);
